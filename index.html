@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CebuTransit — Live Jeepney & Bus Tracker</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-deep:     #0A1628;
+      --bg-card:     #111E35;
+      --bg-card2:    #162440;
+      --gold:        #F5A623;
+      --teal:        #00C9A7;
+      --red:         #FF5C5C;
+      --text-bright: #F0F4FF;
+      --text-muted:  #8899BB;
+      --border:      rgba(255,255,255,0.07);
+      --radius:      14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-deep);
+      color: var(--text-bright);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.5px;
+    }
+    .logo span { color: var(--gold); }
+    .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--teal);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .live-dot {
+      width: 8px; height: 8px;
+      background: var(--teal);
+      border-radius: 50%;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ── LAYOUT ── */
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 57px);
+    }
+
+    /* ── MAP ── */
+    #map {
+      flex: 1;
+      min-height: 320px;
+      z-index: 1;
+    }
+
+    /* ── BOTTOM PANEL ── */
+    .panel {
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      height: 48vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Tab bar */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px 0;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tab-btn.active {
+      color: var(--gold);
+      border-bottom-color: var(--gold);
+    }
+
+    .tab-pane { display: none; padding: 14px 16px 20px; }
+    .tab-pane.active { display: block; }
+
+    /* ── SECTION LABEL ── */
+    .section-label {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+
+    /* ── ROUTE CARDS ── */
+    .route-card {
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 13px 15px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .route-card:hover, .route-card.selected {
+      border-color: var(--gold);
+      background: #1a2d4a;
+    }
+    .route-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .route-name {
+      font-family: 'Syne', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+    .route-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .badge-jeep  { background: rgba(245,166,35,0.18); color: var(--gold); }
+    .badge-bus   { background: rgba(0,201,167,0.18);  color: var(--teal); }
+    .route-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .meta-val {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-bright);
+    }
+    .meta-val.highlight { color: var(--teal); }
+    .meta-val.warn      { color: var(--gold); }
+    .meta-val.danger    { color: var(--red);  }
+    .meta-key {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .vehicles-row {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .veh-chip {
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      transition: all 0.3s;
+    }
+    .veh-chip.active { background: rgba(0,201,167,0.12); color: var(--teal); border-color: var(--teal); }
+
+    /* ── VEHICLES LIST ── */
+    .vehicle-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 11px 14px;
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+    }
+    .veh-icon {
+      font-size: 1.5rem;
+      width: 36px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .veh-info { flex: 1; min-width: 0; }
+    .veh-id {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.88rem;
+    }
+    .veh-route-tag {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .veh-eta {
+      text-align: right;
+      flex-shrink: 0;
+    }
+    .eta-val {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+    .eta-label {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+    .speed-bar-wrap { margin-top: 4px; }
+    .speed-bar {
+      height: 3px;
+      border-radius: 2px;
+      background: var(--border);
+      margin-top: 3px;
+      overflow: hidden;
+    }
+    .speed-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--teal);
+      transition: width 1s ease;
+    }
+
+    /* ── SUMMARY STATS ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat-box {
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .stat-val {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--gold);
+    }
+    .stat-key {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── SEARCH BOX ── */
+    .search-wrap {
+      padding: 12px 16px 0;
+      flex-shrink: 0;
+    }
+    .search-box {
+      width: 100%;
+      background: var(--bg-card2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--text-bright);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box:focus { border-color: var(--gold); }
+    .search-box::placeholder { color: var(--text-muted); }
+
+    /* ── SCROLLBAR ── */
+    .panel::-webkit-scrollbar { width: 4px; }
+    .panel::-webkit-scrollbar-track { background: transparent; }
+    .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── MAP POPUP CUSTOM ── */
+    .leaflet-popup-content-wrapper {
+      background: var(--bg-card) !important;
+      color: var(--text-bright) !important;
+      border: 1px solid var(--gold) !important;
+      border-radius: 10px !important;
+      font-family: 'Inter', sans-serif !important;
+    }
+    .leaflet-popup-tip { background: var(--bg-card) !important; }
+    .popup-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 0.95rem;
+      color: var(--gold);
+      margin-bottom: 6px;
+    }
+    .popup-row {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+    .popup-row strong { color: var(--text-bright); }
+
+    /* ── TOAST ── */
+    .toast {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--bg-card2);
+      border: 1px solid var(--teal);
+      color: var(--teal);
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ── RESPONSIVE ── */
+    @media (min-width: 768px) {
+      .container { flex-direction: row; }
+      #map { flex: 1; min-height: unset; height: calc(100vh - 57px); }
+      .panel {
+        width: 370px;
+        height: calc(100vh - 57px);
+        border-top: none;
+        border-left: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Cebu<span>Transit</span></div>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    Live Simulation
+  </div>
+</header>
+
+<div class="container">
+  <!-- MAP -->
+  <div id="map"></div>
+
+  <!-- BOTTOM / SIDE PANEL -->
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab('routes')">Routes</button>
+      <button class="tab-btn" onclick="showTab('vehicles')">Vehicles</button>
+      <button class="tab-btn" onclick="showTab('summary')">Summary</button>
+    </div>
+
+    <!-- ROUTES TAB -->
+    <div class="tab-pane active" id="tab-routes">
+      <div class="search-wrap" style="padding:12px 0 10px;">
+        <input class="search-box" id="route-search" placeholder="🔍  Search route or destination…" oninput="filterRoutes()" />
+      </div>
+      <div class="section-label">Active Routes</div>
+      <div id="route-list"></div>
+    </div>
+
+    <!-- VEHICLES TAB -->
+    <div class="tab-pane" id="tab-vehicles">
+      <div class="section-label" style="margin-top:4px;">All Vehicles On Road</div>
+      <div id="vehicle-list"></div>
+    </div>
+
+    <!-- SUMMARY TAB -->
+    <div class="tab-pane" id="tab-summary">
+      <div class="section-label" style="margin-top:4px;">Network Snapshot</div>
+      <div class="stats-grid" id="stats-grid"></div>
+      <div class="section-label">Traffic Conditions</div>
+      <div id="traffic-list"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Leaflet JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════
+//  DATA — Cebu City Routes & Stops
+// ═══════════════════════════════════════════════
+
+const ROUTES = [
+  {
+    id: 'R01', name: '01 — Ayala ↔ SM City',
+    type: 'jeep', color: '#F5A623',
+    stops: [
+      { name: 'Ayala Center Terminal', lat: 10.3179, lng: 123.9054 },
+      { name: 'Fuente Osmeña',         lat: 10.3113, lng: 123.8939 },
+      { name: 'Colon Street',          lat: 10.2941, lng: 123.9017 },
+      { name: 'Carbon Market',         lat: 10.2897, lng: 123.8998 },
+      { name: 'Pier Area',             lat: 10.2940, lng: 123.9025 },
+      { name: 'SM City Cebu',          lat: 10.3116, lng: 123.9186 },
+    ],
+    baseDuration: 28,
+    vehicles: ['J-01A','J-01B','J-01C'],
+  },
+  {
+    id: 'R02', name: '02 — IT Park ↔ Colon',
+    type: 'jeep', color: '#F5A623',
+    stops: [
+      { name: 'IT Park (Apas)',        lat: 10.3310, lng: 123.9060 },
+      { name: 'Lahug Circle',          lat: 10.3253, lng: 123.9041 },
+      { name: 'Capitol Site',          lat: 10.3199, lng: 123.8974 },
+      { name: 'Fuente Osmeña',         lat: 10.3113, lng: 123.8939 },
+      { name: 'Colon Street',          lat: 10.2941, lng: 123.9017 },
+    ],
+    baseDuration: 22,
+    vehicles: ['J-02A','J-02B'],
+  },
+  {
+    id: 'R03', name: '03 — SM Seaside ↔ Ayala',
+    type: 'bus', color: '#00C9A7',
+    stops: [
+      { name: 'SM Seaside Terminal',   lat: 10.2771, lng: 123.8769 },
+      { name: 'SRP South Road',        lat: 10.2840, lng: 123.8820 },
+      { name: 'SRP Midsection',        lat: 10.2920, lng: 123.8880 },
+      { name: 'Pier 4 Junction',       lat: 10.2950, lng: 123.9010 },
+      { name: 'Osmeña Blvd',           lat: 10.3020, lng: 123.8950 },
+      { name: 'Ayala Center Terminal', lat: 10.3179, lng: 123.9054 },
+    ],
+    baseDuration: 35,
+    vehicles: ['B-03A','B-03B','B-03C'],
+  },
+  {
+    id: 'R04', name: '04 — Talamban ↔ Colon',
+    type: 'jeep', color: '#F5A623',
+    stops: [
+      { name: 'Talamban Terminal',     lat: 10.3596, lng: 123.9137 },
+      { name: 'Nivel Hills',           lat: 10.3450, lng: 123.9110 },
+      { name: 'SM City Cebu',          lat: 10.3116, lng: 123.9186 },
+      { name: 'Jones Avenue',          lat: 10.3020, lng: 123.9130 },
+      { name: 'Colon Street',          lat: 10.2941, lng: 123.9017 },
+    ],
+    baseDuration: 40,
+    vehicles: ['J-04A','J-04B'],
+  },
+  {
+    id: 'R05', name: '05 — Talisay City Express',
+    type: 'bus', color: '#00C9A7',
+    stops: [
+      { name: 'Talisay City Hall',     lat: 10.2441, lng: 123.8481 },
+      { name: 'Talisay Terminal',      lat: 10.2570, lng: 123.8600 },
+      { name: 'SRP Entry',             lat: 10.2720, lng: 123.8740 },
+      { name: 'SM Seaside',            lat: 10.2771, lng: 123.8769 },
+      { name: 'Osmeña Blvd South',     lat: 10.2950, lng: 123.8900 },
+      { name: 'Carbon Market',         lat: 10.2897, lng: 123.8998 },
+    ],
+    baseDuration: 50,
+    vehicles: ['B-05A','B-05B'],
+  },
+];
+
+// Traffic multipliers per route (simulated congestion)
+const trafficState = {};
+ROUTES.forEach(r => {
+  trafficState[r.id] = 1 + Math.random() * 0.8; // 1.0x–1.8x
+});
+
+// ═══════════════════════════════════════════════
+//  VEHICLE STATE
+// ═══════════════════════════════════════════════
+
+const vehicles = {};
+
+ROUTES.forEach(route => {
+  route.vehicles.forEach((vid, vi) => {
+    const totalStops = route.stops.length;
+    const progress = ((vi * 0.33) % 1); // spread them out
+    const stopIdx = Math.floor(progress * (totalStops - 1));
+    const frac    = (progress * (totalStops - 1)) - stopIdx;
+
+    vehicles[vid] = {
+      id: vid,
+      routeId: route.id,
+      stopIdx,
+      frac,      // 0–1 between stopIdx and stopIdx+1
+      speed: 25 + Math.random() * 20, // km/h
+      lat: route.stops[stopIdx].lat,
+      lng: route.stops[stopIdx].lng,
+      direction: 1, // 1 = forward, -1 = reverse
+      marker: null,
+      lastUpdate: Date.now(),
+    };
+  });
+});
+
+// ═══════════════════════════════════════════════
+//  MAP SETUP
+// ═══════════════════════════════════════════════
+
+const map = L.map('map', { zoomControl: true }).setView([10.3157, 123.8854], 13);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© CartoDB © OpenStreetMap contributors',
+  maxZoom: 19,
+}).addTo(map);
+
+// Draw route polylines
+const routeLines = {};
+ROUTES.forEach(route => {
+  const latlngs = route.stops.map(s => [s.lat, s.lng]);
+  const line = L.polyline(latlngs, {
+    color: route.color,
+    weight: 3,
+    opacity: 0.55,
+    dashArray: route.type === 'bus' ? null : '6,4',
+  }).addTo(map);
+  routeLines[route.id] = line;
+});
+
+// Stop markers
+ROUTES.forEach(route => {
+  route.stops.forEach((stop, i) => {
+    const isTerminal = (i === 0 || i === route.stops.length - 1);
+    const circle = L.circleMarker([stop.lat, stop.lng], {
+      radius: isTerminal ? 7 : 4,
+      color: route.color,
+      fillColor: isTerminal ? route.color : '#0A1628',
+      fillOpacity: isTerminal ? 0.9 : 0.7,
+      weight: 2,
+      opacity: 0.8,
+    }).addTo(map);
+    circle.bindPopup(`
+      <div class="popup-title">${stop.name}</div>
+      <div class="popup-row">Route: <strong>${route.name}</strong></div>
+      <div class="popup-row">Type: <strong>${isTerminal ? '🚏 Terminal' : '🔵 Stop'}</strong></div>
+    `);
+  });
+});
+
+// ── Vehicle marker icons ──
+function makeIcon(type, color) {
+  const emoji = type === 'bus' ? '🚌' : '🚐';
+  return L.divIcon({
+    html: `<div style="
+      font-size:22px;
+      line-height:1;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+      animation: veh-pulse 2s ease-in-out infinite;
+    ">${emoji}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16],
+    className: '',
+  });
+}
+
+// Create markers
+Object.values(vehicles).forEach(v => {
+  const route = ROUTES.find(r => r.id === v.routeId);
+  const marker = L.marker([v.lat, v.lng], {
+    icon: makeIcon(route.type, route.color),
+    zIndexOffset: 100,
+  }).addTo(map);
+  marker.bindPopup('');
+  v.marker = marker;
+});
+
+// ═══════════════════════════════════════════════
+//  SIMULATION LOOP
+// ═══════════════════════════════════════════════
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function updateVehiclePosition(v) {
+  const route = ROUTES.find(r => r.id === v.routeId);
+  const stops = route.stops;
+  const tf = trafficState[route.id];
+
+  // Speed in terms of "fraction of segment per tick"
+  // Avg segment distance ~0.5km, speed ~30km/h => ~60 ticks/segment at 1 tick/s
+  const speedFrac = (v.speed / (tf * 60)) * (1 / 60); // per second tick
+  v.frac += speedFrac * v.direction;
+
+  // Bounce at ends
+  if (v.frac >= 1) {
+    if (v.stopIdx >= stops.length - 2) {
+      v.direction = -1;
+      v.frac = 1;
+    } else {
+      v.stopIdx += 1;
+      v.frac = 0;
+    }
+  }
+  if (v.frac <= 0) {
+    if (v.stopIdx <= 0) {
+      v.direction = 1;
+      v.frac = 0;
+    } else {
+      v.stopIdx -= 1;
+      v.frac = 1;
+    }
+  }
+
+  const from = stops[v.stopIdx];
+  const to   = stops[Math.min(v.stopIdx + 1, stops.length - 1)];
+  v.lat = lerp(from.lat, to.lat, v.frac);
+  v.lng = lerp(from.lng, to.lng, v.frac);
+  v.marker.setLatLng([v.lat, v.lng]);
+
+  // Update popup
+  const nextStop = v.direction === 1 ? to : from;
+  const distFrac = v.direction === 1 ? (1 - v.frac) : v.frac;
+  const etaMins  = Math.round(distFrac * 3 + 1);
+  v.marker.getPopup().setContent(`
+    <div class="popup-title">${v.id}</div>
+    <div class="popup-row">Route: <strong>${route.name}</strong></div>
+    <div class="popup-row">Next stop: <strong>${nextStop.name}</strong></div>
+    <div class="popup-row">ETA to next: <strong>${etaMins} min</strong></div>
+    <div class="popup-row">Speed: <strong>${Math.round(v.speed / trafficState[route.id])} km/h</strong></div>
+    <div class="popup-row">Traffic: <strong>${getTrafficLabel(trafficState[route.id])}</strong></div>
+  `);
+}
+
+function getTrafficLabel(mult) {
+  if (mult < 1.2) return '🟢 Free-flowing';
+  if (mult < 1.5) return '🟡 Moderate';
+  if (mult < 1.8) return '🔴 Heavy';
+  return '🔴 Severe';
+}
+
+function getETA(routeId) {
+  // ETA to end of route from average vehicle position
+  const route = ROUTES.find(r => r.id === routeId);
+  const tf = trafficState[routeId];
+  return Math.round(route.baseDuration * tf);
+}
+
+function getNextVehicleETA(routeId) {
+  // Approximate minutes until nearest vehicle arrives at start stop
+  const routeVehicles = Object.values(vehicles).filter(v => v.routeId === routeId);
+  if (!routeVehicles.length) return '—';
+  const mins = Math.min(...routeVehicles.map(v => {
+    const distFrac = v.frac + v.stopIdx;
+    return Math.max(1, Math.round((distFrac / (ROUTES.find(r=>r.id===routeId).stops.length)) * getETA(routeId) * 0.5));
+  }));
+  return mins;
+}
+
+// Randomly fluctuate traffic
+function fluctuateTraffic() {
+  ROUTES.forEach(r => {
+    trafficState[r.id] = Math.max(1, Math.min(2.2,
+      trafficState[r.id] + (Math.random() - 0.5) * 0.05
+    ));
+  });
+}
+
+// Main tick
+function tick() {
+  Object.values(vehicles).forEach(updateVehiclePosition);
+  fluctuateTraffic();
+  renderVehicleList();
+  renderSummary();
+  // Partial re-render for route durations
+  document.querySelectorAll('.route-eta-val').forEach(el => {
+    const rid = el.dataset.rid;
+    el.textContent = getETA(rid) + ' min';
+    el.className = 'meta-val route-eta-val ' + etaClass(getETA(rid), ROUTES.find(r=>r.id===rid).baseDuration);
+  });
+  document.querySelectorAll('.next-veh-val').forEach(el => {
+    const rid = el.dataset.rid;
+    el.textContent = getNextVehicleETA(rid) + ' min';
+  });
+}
+
+function etaClass(eta, base) {
+  if (eta <= base * 1.1) return 'highlight';
+  if (eta <= base * 1.4) return 'warn';
+  return 'danger';
+}
+
+setInterval(tick, 1000);
+
+// ═══════════════════════════════════════════════
+//  RENDER ROUTES LIST
+// ═══════════════════════════════════════════════
+
+let selectedRoute = null;
+
+function renderRouteList(filter = '') {
+  const list = document.getElementById('route-list');
+  list.innerHTML = '';
+  const lower = filter.toLowerCase();
+
+  ROUTES.forEach(route => {
+    if (filter && !route.name.toLowerCase().includes(lower) &&
+        !route.stops.some(s => s.name.toLowerCase().includes(lower))) return;
+
+    const eta       = getETA(route.id);
+    const nextVeh   = getNextVehicleETA(route.id);
+    const tf        = trafficState[route.id];
+    const tfLabel   = getTrafficLabel(tf);
+    const isSelected = selectedRoute === route.id;
+
+    const vehChips = route.vehicles.map(vid => {
+      const v = vehicles[vid];
+      const isMoving = v && v.speed > 5;
+      return `<span class="veh-chip ${isMoving ? 'active' : ''}">${vid}</span>`;
+    }).join('');
+
+    const card = document.createElement('div');
+    card.className = 'route-card' + (isSelected ? ' selected' : '');
+    card.innerHTML = `
+      <div class="route-header">
+        <div class="route-name">${route.name}</div>
+        <span class="route-badge ${route.type === 'jeep' ? 'badge-jeep' : 'badge-bus'}">
+          ${route.type === 'jeep' ? '🚐 Jeep' : '🚌 Bus'}
+        </span>
+      </div>
+      <div class="route-meta">
+        <div class="meta-item">
+          <span class="meta-val route-eta-val ${etaClass(eta, route.baseDuration)}" data-rid="${route.id}">${eta} min</span>
+          <span class="meta-key">Travel Time</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-val next-veh-val" data-rid="${route.id}">${nextVeh} min</span>
+          <span class="meta-key">Next Vehicle</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-val">${route.stops.length}</span>
+          <span class="meta-key">Stops</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-val" style="font-size:0.8rem">${tfLabel}</span>
+          <span class="meta-key">Traffic</span>
+        </div>
+      </div>
+      <div class="vehicles-row">${vehChips}</div>
+    `;
+    card.addEventListener('click', () => selectRoute(route.id));
+    list.appendChild(card);
+  });
+}
+
+function selectRoute(routeId) {
+  selectedRoute = (selectedRoute === routeId) ? null : routeId;
+  renderRouteList(document.getElementById('route-search').value);
+
+  if (selectedRoute) {
+    const route = ROUTES.find(r => r.id === routeId);
+    // Highlight line
+    Object.entries(routeLines).forEach(([rid, line]) => {
+      line.setStyle({ opacity: rid === routeId ? 0.95 : 0.2, weight: rid === routeId ? 5 : 2 });
+    });
+    // Fit map to route
+    const latlngs = route.stops.map(s => [s.lat, s.lng]);
+    map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
+    showToast(`📍 Showing route: ${route.name}`);
+  } else {
+    Object.values(routeLines).forEach(line => line.setStyle({ opacity: 0.55, weight: 3 }));
+    showToast('Showing all routes');
+  }
+}
+
+function filterRoutes() {
+  renderRouteList(document.getElementById('route-search').value);
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER VEHICLES LIST
+// ═══════════════════════════════════════════════
+
+function renderVehicleList() {
+  const list = document.getElementById('vehicle-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  Object.values(vehicles).forEach(v => {
+    const route = ROUTES.find(r => r.id === v.routeId);
+    const stops = route.stops;
+    const tf = trafficState[route.id];
+    const nextStop = v.direction === 1
+      ? stops[Math.min(v.stopIdx + 1, stops.length - 1)]
+      : stops[Math.max(v.stopIdx, 0)];
+    const distFrac = v.direction === 1 ? (1 - v.frac) : v.frac;
+    const etaMins = Math.max(1, Math.round(distFrac * 4 + 1));
+    const actualSpeed = Math.round(v.speed / tf);
+    const speedPct = Math.min(100, Math.round(actualSpeed / 60 * 100));
+
+    const row = document.createElement('div');
+    row.className = 'vehicle-row';
+    row.innerHTML = `
+      <div class="veh-icon">${route.type === 'bus' ? '🚌' : '🚐'}</div>
+      <div class="veh-info">
+        <div class="veh-id">${v.id}</div>
+        <div class="veh-route-tag">${route.name}</div>
+        <div class="speed-bar-wrap">
+          <div style="font-size:0.65rem;color:var(--text-muted)">${actualSpeed} km/h · ${getTrafficLabel(tf)}</div>
+          <div class="speed-bar"><div class="speed-fill" style="width:${speedPct}%"></div></div>
+        </div>
+      </div>
+      <div class="veh-eta">
+        <div class="eta-val" style="color:${etaMins<=3?'var(--teal)':etaMins<=7?'var(--gold)':'var(--red)'}">${etaMins}m</div>
+        <div class="eta-label">Next stop</div>
+        <div style="font-size:0.65rem;color:var(--text-muted);margin-top:2px;max-width:80px;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nextStop.name}</div>
+      </div>
+    `;
+    row.addEventListener('click', () => {
+      map.setView([v.lat, v.lng], 16);
+      v.marker.openPopup();
+      showToast(`🚐 Tracking ${v.id}`);
+    });
+    list.appendChild(row);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER SUMMARY
+// ═══════════════════════════════════════════════
+
+function renderSummary() {
+  const grid = document.getElementById('stats-grid');
+  const tlist = document.getElementById('traffic-list');
+  if (!grid || !tlist) return;
+
+  const totalVeh = Object.keys(vehicles).length;
+  const activeRoutes = ROUTES.length;
+  const avgTraffic = ROUTES.reduce((a, r) => a + trafficState[r.id], 0) / ROUTES.length;
+  const heavyRoutes = ROUTES.filter(r => trafficState[r.id] >= 1.5).length;
+
+  grid.innerHTML = `
+    <div class="stat-box">
+      <div class="stat-val">${totalVeh}</div>
+      <div class="stat-key">Vehicles Tracked</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val">${activeRoutes}</div>
+      <div class="stat-key">Active Routes</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" style="color:${avgTraffic>1.4?'var(--red)':'var(--teal)'}">${avgTraffic.toFixed(1)}x</div>
+      <div class="stat-key">Avg Congestion</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" style="color:${heavyRoutes>1?'var(--red)':'var(--gold)'}">${heavyRoutes}</div>
+      <div class="stat-key">Heavy Traffic Routes</div>
+    </div>
+  `;
+
+  tlist.innerHTML = ROUTES.map(r => {
+    const tf = trafficState[r.id];
+    const label = getTrafficLabel(tf);
+    const eta = getETA(r.id);
+    const pct = Math.min(100, Math.round((tf - 1) / 1.2 * 100));
+    const barColor = tf < 1.2 ? 'var(--teal)' : tf < 1.5 ? 'var(--gold)' : 'var(--red)';
+    return `
+      <div class="route-card" style="margin-bottom:8px">
+        <div class="route-header">
+          <div class="route-name" style="font-size:0.82rem">${r.name}</div>
+          <span style="font-size:0.75rem">${label}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-muted);margin-bottom:5px">
+          <span>Travel time: <strong style="color:var(--text-bright)">${eta} min</strong></span>
+          <span>Delay: <strong style="color:${barColor}">+${Math.round((tf-1)*r.baseDuration)} min</strong></span>
+        </div>
+        <div class="speed-bar">
+          <div class="speed-fill" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════
+
+function showTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['routes','vehicles','summary'][i] === name);
+  });
+  document.querySelectorAll('.tab-pane').forEach(p => {
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ═══════════════════════════════════════════════
+//  INITIAL RENDER
+// ═══════════════════════════════════════════════
+
+renderRouteList();
+renderVehicleList();
+renderSummary();
+
+setTimeout(() => showToast('🚐 Simulation running — Cebu City'), 800);
+</script>
+</body>
+</html>

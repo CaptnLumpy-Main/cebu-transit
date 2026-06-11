@@ -654,10 +654,27 @@ function updateVehiclePosition(v) {
     }
   }
 
-  const from = stops[v.stopIdx];
+ const from = stops[v.stopIdx];
   const to   = stops[Math.min(v.stopIdx + 1, stops.length - 1)];
-  v.lat = lerp(from.lat, to.lat, v.frac);
-  v.lng = lerp(from.lng, to.lng, v.frac);
+
+  // ── NEW: SNAP VEHICLES TO REAL ROADS IF AVAILABLE ──
+  if (route.roadSegments && route.roadSegments[v.stopIdx]) {
+    const segPoints = route.roadSegments[v.stopIdx];
+    // Maps your existing v.frac (0 to 1) to the detailed street array indices
+    const idx = Math.floor(v.frac * (segPoints.length - 1));
+    const subFrac = (v.frac * (segPoints.length - 1)) - idx;
+    
+    const p1 = segPoints[idx];
+    const p2 = segPoints[Math.min(idx + 1, segPoints.length - 1)];
+    
+    v.lat = lerp(p1[0], p2[0], subFrac);
+    v.lng = lerp(p1[1], p2[1], subFrac);
+  } else {
+    // Original straight-line fallback if API hasn't loaded yet
+    v.lat = lerp(from.lat, to.lat, v.frac);
+    v.lng = lerp(from.lng, to.lng, v.frac);
+  }
+
   v.marker.setLatLng([v.lat, v.lng]);
 
   // Update popup
@@ -706,6 +723,47 @@ function fluctuateTraffic() {
       trafficState[r.id] + (Math.random() - 0.5) * 0.05
     ));
   });
+}
+
+// ═══════════════════════════════════════════════
+//  OSRM ROAD SNAPPING ENGINE (NEW)
+// ═══════════════════════════════════════════════
+async function snapLanesToRoads() {
+  showToast('🗺️ Snapping lanes to real roads...');
+  
+  for (const route of ROUTES) {
+    route.roadSegments = [];
+    const fullPath = [];
+    
+    for (let i = 0; i < route.stops.length - 1; i++) {
+      const from = route.stops[i];
+      const to = route.stops[i+1];
+      
+      const url = `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+      
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        if (data.routes && data.routes[0]) {
+          const points = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+          route.roadSegments[i] = points;
+          fullPath.push(...points);
+        } else {
+          route.roadSegments[i] = [[from.lat, from.lng], [to.lat, to.lng]];
+          fullPath.push([from.lat, from.lng], [to.lat, to.lng]);
+        }
+      } catch (err) {
+        route.roadSegments[i] = [[from.lat, from.lng], [to.lat, to.lng]];
+        fullPath.push([from.lat, from.lng], [to.lat, to.lng]);
+      }
+    }
+    
+    if (fullPath.length > 0 && routeLines[route.id]) {
+      routeLines[route.id].setLatLngs(fullPath);
+    }
+  }
+  showToast('✅ Lanes & vehicles snapped to streets!');
 }
 
 // Main tick
@@ -955,6 +1013,9 @@ function showToast(msg) {
 renderRouteList();
 renderVehicleList();
 renderSummary();
+
+// ── ADD THIS LINE AT THE VERY BOTTOM ──
+snapLanesToRoads(); 
 
 setTimeout(() => showToast('🚐 Simulation running — Cebu City'), 800);
 </script>
